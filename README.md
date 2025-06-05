@@ -17,7 +17,7 @@ A real-time voice-based assistant that transcribes user speech, extracts identit
 
 ## 🏗️ Architecture
 
-![Architecture](./flow_chart.png)
+![Architecture](./architecture.png)
 
 ---
 
