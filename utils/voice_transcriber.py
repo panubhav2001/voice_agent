@@ -81,6 +81,7 @@ async def start_live_transcription():
         channels=1,
         sample_rate=16000,
         endpointing=2,
+        vad_events=True,
         numerals=True
     )
     await dg_connection.start(options)
