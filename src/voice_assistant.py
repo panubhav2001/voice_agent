@@ -1,12 +1,14 @@
 import asyncio
-from utils.voice_transcriber import start_live_transcription
-from utils.voice_synthesizer import synthesize_response
+from src.voice_transcriber import start_live_transcription
+from src.voice_synthesizer import synthesize_response
 from rag_pipeline.session import SessionState
 from rag_pipeline.rag_chat_agent import handle_user_input
+import uuid 
 
 async def run_voice_assistant():
-    session = SessionState(thread_id="voice_thread_001")
-
+    session_id = f"voice_thread_{uuid.uuid4()}"
+    session = SessionState(thread_id=session_id)
+    print(f"Starting new conversation with Thread ID: {session.thread_id}")
     # Initial greet
     await synthesize_response(
         "Hi, this is SmileBright Dental Clinic. How can I help?"
@@ -15,8 +17,8 @@ async def run_voice_assistant():
     async for text, mic in start_live_transcription():
         mic.pause()
         print(f"User said: {text}")
-
-        if any(phrase in text.lower() for phrase in ["end call", "goodbye", "bye"]):
+        clean_text = text.strip().lower()
+        if any(phrase in clean_text for phrase in ["end call", "goodbye", "bye"]):
             await synthesize_response("Thank you for calling. Goodbye.")
             break
 

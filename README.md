@@ -38,8 +38,8 @@ A real-time voice-enabled assistant that understands speech, verifies identity, 
 ### 1. Clone the repository
 
 ```bash
-git clone 
-cd voice-assistant
+git clone https://github.com/panubhav2001/voice_agent.git
+cd voice_agent
 ```
 ### 2. Install Dependencies
 Requires Python 3.9 or higher:
@@ -61,14 +61,14 @@ python voice_assistant.py
 ```
 
 ## Example Conversation
-👤 User: Hi, I want to book a service.
-🤖 Assistant: I can help with that. Please tell me your first name, last name, and year of birth.
+- 👤 User: Hi, I want to book a service.
+- 🤖 Assistant: I can help with that. Please tell me your first name, last name, and year of birth.
 
-👤 User: Jane Doe, born in 1990.
-🤖 Assistant: Thanks Jane. I’ve noted your request to schedule a new booking. Someone from our team will follow up shortly.
+- 👤 User: Jane Doe, born in 1990.
+- 🤖 Assistant: Thanks Jane. I’ve noted your request to schedule a new booking. Someone from our team will follow up shortly.
 
-👤 User: When is my next appointment?
-🤖 Assistant: Thank you Jane Doe. Your current status is: Your service is scheduled for Wednesday at 10 AM.
+- 👤 User: When is my next appointment?
+- 🤖 Assistant: Thank you Jane Doe. Your current status is: Your service is scheduled for Wednesday at 10 AM.
 
-👤 User: What services do you offer?
-🤖 Assistant: We provide maintenance, inspections, oil changes, and more. How can I assist you today?
+- 👤 User: What services do you offer?
+- 🤖 Assistant: We provide maintenance, inspections, oil changes, and more. How can I assist you today?

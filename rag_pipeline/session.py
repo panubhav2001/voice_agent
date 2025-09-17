@@ -1,8 +1,18 @@
-class SessionState:
-    def __init__(self, thread_id: str = "default_thread"):
-        self.thread_id = thread_id
-        self.awaiting_identity = False
-        self.identity_verified = False
-        self.user = None
-        self.pending_intent = None
-        self.chat_history = []
+from pydantic import BaseModel, Field
+from typing import List, Optional, Any, Dict
+
+class SessionState(BaseModel):
+    """
+    Represents the state of a user session, including multi-turn logic for booking.
+    """
+    # Existing fields
+    thread_id: str
+    awaiting_identity: bool = False
+    identity_verified: bool = False
+    user: Optional[Any] = None
+    pending_intent: Optional[str] = None
+    chat_history: List[Any] = Field(default_factory=list)
+
+    # New fields for the booking flow
+    awaiting_booking_details: bool = False
+    pending_booking_details: Optional[Dict[str, Any]] = None

@@ -1,113 +1,81 @@
+import json
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.documents import Document
-from datetime import datetime
-import uuid
-import ast
 
 from rag_pipeline.session import SessionState
-from utils.llm_agent import extract_identity
-from utils.user_database import find_user
-from rag_pipeline.rag_graph import rag_app, FAISS_DB_PATH, vectordb
-
-BOOKING_STATUS_KEYWORDS = [
-    "booking status", "appointment status", "scheduled", "confirmed",
-    "next booking", "next appointment", "do i have a booking", "when is my booking",
-    "is my service still scheduled"
-]
-
-NEW_BOOKING_KEYWORDS = [
-    "make a booking", "book an appointment", "schedule service",
-    "create a booking", "i want to book", "can i book"
-]
-
-def classify_intent(text: str) -> str:
-    text = text.lower()
-    if any(k in text for k in BOOKING_STATUS_KEYWORDS):
-        return "booking_status"
-    if any(k in text for k in NEW_BOOKING_KEYWORDS):
-        return "new_booking"
-    return "general"
+from src.llm_agent import extract_identity, extract_booking_details
+from rag_pipeline.rag_graph import rag_app
+from rag_pipeline.utils.intent_classifier import classify_intent
+from rag_pipeline.utils.misc import store_summary_to_faiss, validate_time_with_rag
 
 async def handle_user_input(text: str, session: SessionState) -> str:
+    """
+    Handles user input by managing a multi-turn conversation for different intents.
+    """
     session.chat_history.append(HumanMessage(content=text))
 
-    # Step 1: If we're waiting for identity
+    # --- BLOCK 1: Handles the turn AFTER the agent asks for identity ---
+    # This block has the highest priority because it's a direct response to a question.
     if session.awaiting_identity and not session.identity_verified:
-        identity = extract_identity(text)
-        print(identity)
-        print(type(identity))
-        if isinstance(identity, str):
-            identity = ast.literal_eval(identity)
-        elif not isinstance(identity, dict) or not all(k in identity for k in ("first_name", "last_name", "year_of_birth")):
-            return "Please provide your full name and year of birth so I can verify you."
+        identity_str = extract_identity(text)
+        user_details = json.loads(identity_str)
 
-        user = identity
-        if user:
+        if user_details.get("first_name") and user_details.get("year_of_birth"):
             session.identity_verified = True
             session.awaiting_identity = False
-            session.user = user['first_name'] + ' ' + user['last_name']
+            session.user = user_details
 
-            # Respond based on stored intent
-            if session.pending_intent == "booking_status":
-                msg = f"Thank you {user['first_name']} {user['last_name']}. Your current status is: {user['status']}."
-            else:  # new_booking
-                msg = f"Thanks {user['first_name']}. I’ve noted your request to schedule a new booking. Someone from our team will follow up shortly."
-            
-            session.chat_history.append(SystemMessage(content=msg))
-            return msg
+            # Check if we were in the middle of a booking
+            if session.pending_booking_details:
+                booking_info = session.pending_booking_details
+                session.pending_booking_details = None # Clear the pending info
+                # This is the final confirmation message for the booking flow
+                return f"Perfect, thank you. You're all set for your appointment on {booking_info['day']} at {booking_info['time']}. We'll see you then!"
+            else:
+                # Handle other intents that required verification (e.g., booking_status)
+                return "Thank you for verifying your identity. How can I now help you with your booking status?"
         else:
-            return "I couldn't verify your identity. Please try again with your full name and year of birth."
+            return "I'm sorry, I didn't catch your full name and year of birth. Could you please provide them again?"
 
-    # Step 2: Normal flow
+    # --- BLOCK 2: Handles the turn AFTER the agent asks for a time slot ---
+    if session.awaiting_booking_details:
+
+        details_str = extract_booking_details(text)
+        details = json.loads(details_str)
+
+        if not details.get("day") or not details.get("time"):
+            return "I'm sorry, I didn't quite catch that. Could you please provide a day and time for the appointment?"
+
+        # Validate the requested time against the RAG knowledge base
+        is_open = validate_time_with_rag(details)
+        if "YES" in is_open:
+            session.awaiting_booking_details = False # Turn this flag off
+            session.pending_booking_details = details # Store the validated time
+            
+            # Now, transition to asking for identity to finalize
+            session.awaiting_identity = True 
+            return "Great, that time is available. To finalize the booking for you, could you please tell me your full name and year of birth?"
+        else:
+            # Re-prompt the user if the time is invalid, keeping the flag on
+            return "It looks like we're closed at that time. Please choose a different time."
+
+    # --- BLOCK 3: This is the first entry point for classifying new intents ---
     intent = classify_intent(text)
 
-    if intent in {"booking_status", "new_booking"}:
-        if not session.identity_verified:
-            session.awaiting_identity = True
-            session.pending_intent = intent  # Store for next round
-            return "To help you with that, could you please tell me your full name and year of birth?"
+    if intent == "new_booking":
+        session.awaiting_booking_details = True
+        return "Of course. What day and time would you like to schedule your appointment for?"
+        
+    if intent == "booking_status":
+        session.awaiting_identity = True
+        return "Certainly. To check your booking status, I'll need to verify your identity. What is your full name and year of birth?"
 
-        # Identity already verified
-        user = session.user
-        if intent == "booking_status":
-            msg = f"Thank you {user['first_name']} {user['last_name']}. Your current status is: {user['status']}."
-        else:  # new_booking
-            msg = f"Thanks {user['first_name']}. I’ve noted your request to schedule a new booking. Someone from our team will follow up shortly."
-
-        session.chat_history.append(SystemMessage(content=msg))
-        return msg
-
-    # Step 3: General queries → fallback to RAG
-    response = rag_app.invoke(
-        {"messages": session.chat_history, "context": ""},
-        config={"configurable": {"thread_id": session.thread_id}}
-    )
-    ai_msg = response["messages"][-1]
-    session.chat_history.append(ai_msg)
-
-    await store_summary_to_faiss(session)
-    return ai_msg.content
-
-async def store_summary_to_faiss(session: SessionState):
-    conversation_text = "\n".join(
-        f"{'User' if msg.type == 'human' else 'AI'}: {msg.content.strip()}"
-        for msg in session.chat_history
-    )
-
-    summary_response = rag_app.invoke(
-        {
-            "messages": [
-                SystemMessage(content="Summarize the following conversation briefly and clearly."),
-                HumanMessage(content=conversation_text)
-            ]
-        },
-        config={"configurable": {"thread_id": "summary_" + session.thread_id}}
-    )
-    summary = summary_response["messages"][-1].content.strip()
-    doc = Document(
-        page_content=summary,
-        metadata={"timestamp": datetime.utcnow().isoformat(), "thread_id": session.thread_id}
-    )
-
-    vectordb.add_documents([doc], ids=[str(uuid.uuid4())])
-    vectordb.save_local(FAISS_DB_PATH)
+    # --- BLOCK 4: Fallback to general RAG for all other queries ---
+    else:
+        response = rag_app.invoke(
+            {"messages": session.chat_history, "session_state": session},
+            config={"configurable": {"thread_id": session.thread_id}}
+        )
+        ai_msg = response["messages"][-1]
+        session.chat_history.append(ai_msg)
+        await store_summary_to_faiss(session)
+        return ai_msg.content
